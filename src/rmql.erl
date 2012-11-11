@@ -238,7 +238,7 @@ parse_opts(Opts) ->
 					virtual_host = VHost,
 					host = Host,
 					port = Port,
-					heartbeat = 1
+					heartbeat = 0
 				},
 	{ok, AmqpSpec, Qos}.
 
