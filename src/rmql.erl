@@ -19,7 +19,17 @@
 -spec connection_start() -> {'ok', pid()} | {'error', any()}.
 connection_start() ->
 	{ok, AmqpSpec, _Qos} = parse_opts([]),
-	amqp_connection:start(AmqpSpec).
+	%% To avoid deadlock on app shutdown add timeout to start amqp connection
+	Pid = self(),
+	spawn(fun() ->
+		Result = amqp_connection:start(AmqpSpec),
+		Pid ! {amqp_connection, Result}
+	end),
+	receive
+		{amqp_connection, Result} -> Result
+	after
+		2000 -> {error, timeout}
+	end.
 
 
 -spec connection_close(pid()) -> 'ok'.
