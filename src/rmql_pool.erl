@@ -78,11 +78,11 @@ handle_cast({close_channel, Chan}, St) ->
     case ets:match(?MODULE, {'$1', Chan}) of
         [[Ref]] ->
             demonitor(Ref),
-		    catch(amqp_channel:close(Chan)),
             ets:delete(?MODULE, Ref);
         [] ->
             ignore
     end,
+    catch(amqp_channel:close(Chan)),
     {noreply, St}.
 
 handle_info({timeout, _Ref, connect}, St) ->
@@ -101,7 +101,7 @@ handle_info({timeout, _Ref, connect}, St) ->
 handle_info(#'DOWN'{ref = Ref}, St) ->
     case ets:lookup(?MODULE, Ref) of
         [{_, Chan}] ->
-            rmql:channel_close(Chan),
+		    catch(amqp_channel:close(Chan)),
             ets:delete(?MODULE, Ref);
         [] ->
             ignore
