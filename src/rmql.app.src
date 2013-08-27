@@ -8,5 +8,7 @@
 		lager
 	]},
 	{mod, { rmql_app, []}},
-	{env, []}
+	{env, [
+		{survive, false}
+	]}
 ]}.
