@@ -92,7 +92,7 @@ init([RoutingKey]) ->
 
 handle_call({call, _}, _From, St = #st{channel = undefined}) ->
 	{reply, {error, disconnected}, St};
-handle_call({call, _, _, _}, _From, St = #st{}) ->
+handle_call({call, _, _, _}, _From, St = #st{channel = undefined}) ->
 	{reply, {error, disconnected}, St};
 
 handle_call({call, ContentType, Payload, Queue}, From, State) ->
