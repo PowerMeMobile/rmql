@@ -2,6 +2,7 @@
 
 %% @TODO
 %% add multiprocessing support
+%% add try catch
 
 -behaviour(gen_server).
 
@@ -28,6 +29,7 @@
 -record(st, {
 	channel :: pid(),
 	handler :: function(),
+	fun_arity :: 1 | 2,
 	chan_mon_ref :: reference(),
 	queue :: binary(),
 	survive :: boolean()
@@ -47,7 +49,16 @@ start_link(Name, Queue, Fun) ->
 
 init([Queue, Fun]) ->
 	{ok, IsSurvive} = application:get_env(rmql, survive),
-	St = #st{survive = IsSurvive, queue = Queue, handler = Fun},
+    FunArity = case erlang:fun_info(Fun, arity) of
+		{arity, 1} -> 1;
+		{arity, 2} -> 2
+	end,
+	St = #st{
+		survive = IsSurvive,
+		queue = Queue,
+		handler = Fun,
+		fun_arity = FunArity
+	},
 	case setup_channel(St) of
 		#st{channel = undefined, survive = false} -> {stop, amqp_unavailable};
 		St2 = #st{} -> {ok, St2}
@@ -84,25 +95,33 @@ handle_info(#'basic.cancel_ok'{}, State) ->
 
 handle_info({#'basic.deliver'{delivery_tag = DeliveryTag},
              #amqp_msg{props = Props, payload = Payload}},
-            State = #st{handler = Fun, channel = Channel}) ->
-    #'P_basic'{correlation_id = CorrelationId,
-               reply_to = Q} = Props,
+            St = #st{handler = Fun, channel = Channel}) ->
+    #'P_basic'{
+		correlation_id = CorrelationId,
+		reply_to = Q,
+		content_type = ContentType
+	} = Props,
+	Response =
+	case St#st.fun_arity of
+		1 -> Fun(Payload);
+		2 -> Fun(ContentType, Payload)
+	end,
 	{RespContentType, RespPayload} =
-    case Fun(Payload) of
-		Bin when is_binary(Bin) -> {undefined, Bin};
+    case Response of
+		Bin when is_binary(Bin) -> {<<>>, Bin};
 		{CT, Bin} when is_binary(Bin) andalso is_binary(CT) ->
 			{CT, Bin}
 	end,
-    Properties = #'P_basic'{
+    RespProps = #'P_basic'{
 		correlation_id = CorrelationId,
 		content_type = RespContentType
 	},
     Publish = #'basic.publish'{exchange = <<>>,
                                routing_key = Q},
-    amqp_channel:call(Channel, Publish, #amqp_msg{props = Properties,
+    amqp_channel:call(Channel, Publish, #amqp_msg{props = RespProps,
                                                   payload = RespPayload}),
     amqp_channel:call(Channel, #'basic.ack'{delivery_tag = DeliveryTag}),
-    {noreply, State};
+    {noreply, St};
 
 handle_info(Message, State) ->
 	{stop, {unexpected_info, Message}, State}.
