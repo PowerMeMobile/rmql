@@ -109,6 +109,9 @@ handle_call(Msg, _From, State) ->
 handle_cast(Msg, State) ->
     {stop, {unexpected_cast, Msg}, State}.
 
+handle_info(amqp_available, St = #st{}) ->
+	{noreply, setup_channel(St)};
+
 handle_info(Down = #'DOWN'{ref = Ref}, St = #st{chan_mon_ref = Ref, survive = false}) ->
 	lager:error("rmql_rpc_srv (~p): amqp channel down (~p)", [St#st.routing_key, Down#'DOWN'.info]),
 	{stop, amqp_channel_down, St#st{channel = undefined}};
