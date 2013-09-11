@@ -11,7 +11,7 @@
 
 -export([
 	start_link/1, start_link/2,
-	call/2, call/4
+	call/2, call/3, call/4
 ]).
 -export([
 	init/1,
@@ -62,6 +62,17 @@ call(RpcClient, Payload) ->
 		_:{timeout, _} -> {error, timeout}
 	end.
 
+-spec call(pid(), binary(), binary()) ->
+	{ok, binary()} |
+	{error, timeout} |
+	{error, disconnected} |
+	{error, non_routable}.
+call(RpcClient, Payload, ContentType) ->
+    try	gen_server:call(RpcClient, {call, Payload, ContentType})
+	catch
+		_:{timeout, _} -> {error, timeout}
+	end.
+
 -spec call(pid(), binary(), binary(), binary()) ->
 	{ok, binary()} |
 	{error, timeout} |
@@ -92,6 +103,8 @@ init([RoutingKey]) ->
 
 handle_call({call, _}, _From, St = #st{channel = undefined}) ->
 	{reply, {error, disconnected}, St};
+handle_call({call, _, _}, _From, St = #st{channel = undefined}) ->
+	{reply, {error, disconnected}, St};
 handle_call({call, _, _, _}, _From, St = #st{channel = undefined}) ->
 	{reply, {error, disconnected}, St};
 
@@ -101,6 +114,10 @@ handle_call({call, ContentType, Payload, Queue}, From, State) ->
 
 handle_call({call, Payload}, From, State) ->
     NewState = publish(Payload, From, State),
+    {noreply, NewState};
+
+handle_call({call, Payload, ContentType}, From, State) ->
+    NewState = publish(ContentType, Payload, From, State),
     {noreply, NewState};
 
 handle_call(Msg, _From, State) ->
@@ -182,6 +199,8 @@ setup_channel(St) ->
 
 publish(Payload, From, St = #st{}) ->
 	publish(<<"application/octet-stream">>, Payload, St#st.routing_key, From, St).
+publish(ContentType, Payload, From, St = #st{}) ->
+	publish(ContentType, Payload, St#st.routing_key, From, St).
 publish(ContentType, Payload, RoutingKey, From, St) ->
 	#st{
 		channel = Channel,
