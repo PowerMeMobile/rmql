@@ -32,7 +32,13 @@
 	fun_arity :: 1 | 2,
 	chan_mon_ref :: reference(),
 	queue :: binary(),
-	survive :: boolean()
+	survive :: boolean(),
+
+	%% for step only (temp fields)
+	dtag :: pos_integer(),
+	payload :: binary(),
+	bprops :: #'P_basic'{},
+	response :: binary() | {binary(), binary()} | skip
 }).
 
 %% ===================================================================
@@ -94,33 +100,13 @@ handle_info(#'basic.cancel_ok'{}, State) ->
     {stop, normal, State};
 
 handle_info({#'basic.deliver'{delivery_tag = DeliveryTag},
-             #amqp_msg{props = Props, payload = Payload}},
-            St = #st{handler = Fun, channel = Channel}) ->
-    #'P_basic'{
-		correlation_id = CorrelationId,
-		reply_to = Q,
-		content_type = ContentType
-	} = Props,
-	Response =
-	case St#st.fun_arity of
-		1 -> Fun(Payload);
-		2 -> Fun(ContentType, Payload)
-	end,
-	{RespContentType, RespPayload} =
-    case Response of
-		Bin when is_binary(Bin) -> {<<>>, Bin};
-		{CT, Bin} when is_binary(Bin) andalso is_binary(CT) ->
-			{CT, Bin}
-	end,
-    RespProps = #'P_basic'{
-		correlation_id = CorrelationId,
-		content_type = RespContentType
+             #amqp_msg{props = Props, payload = Payload}}, St = #st{}) ->
+	St1 = St#st{
+		dtag = DeliveryTag,
+		payload = Payload,
+		bprops = Props
 	},
-    Publish = #'basic.publish'{exchange = <<>>,
-                               routing_key = Q},
-    amqp_channel:call(Channel, Publish, #amqp_msg{props = RespProps,
-                                                  payload = RespPayload}),
-    amqp_channel:call(Channel, #'basic.ack'{delivery_tag = DeliveryTag}),
+	step(process, St1),
     {noreply, St};
 
 handle_info(Message, State) ->
@@ -149,3 +135,55 @@ setup_channel(St) ->
 				chan_mon_ref = MonRef};
 		unavailable -> St
 	end.
+
+step(process, St = #st{fun_arity = 1}) ->
+	Fun = St#st.handler,
+	step(respond, St#st{response = Fun(St#st.payload)});
+step(process, St = #st{fun_arity = 2}) ->
+    #'P_basic'{
+		content_type = ContentType
+	} = St#st.bprops,
+	Fun = St#st.handler,
+	step(respond, St#st{response = Fun(ContentType, St#st.payload)});
+
+step(respond, St = #st{response = noreply}) ->
+	step(ack, St);
+step(respond, St = #st{response = RespPayload}) when is_binary(RespPayload) ->
+    #'P_basic'{
+		correlation_id = CorrelationId,
+		reply_to = Q
+	} = St#st.bprops,
+    Publish = #'basic.publish'{
+		exchange = <<>>,
+		routing_key = Q
+	},
+    RespProps = #'P_basic'{
+		correlation_id = CorrelationId,
+		content_type = <<>>
+	},
+	Channel = St#st.channel,
+    amqp_channel:call(Channel, Publish, #amqp_msg{props = RespProps,
+                                                  payload = RespPayload}),
+	step(ack, St);
+step(respond, St = #st{response = {RespContentType, RespPayload}}) when
+			is_binary(RespPayload) andalso
+			is_binary(RespContentType) ->
+    #'P_basic'{
+		correlation_id = CorrelationId,
+		reply_to = Q
+	} = St#st.bprops,
+    Publish = #'basic.publish'{
+		exchange = <<>>,
+		routing_key = Q
+	},
+    RespProps = #'P_basic'{
+		correlation_id = CorrelationId,
+		content_type = RespContentType
+	},
+	Channel = St#st.channel,
+    amqp_channel:call(Channel, Publish, #amqp_msg{props = RespProps,
+                                                  payload = RespPayload}),
+	step(ack, St);
+
+step(ack, #st{channel = Channel, dtag = DeliveryTag}) ->
+    amqp_channel:call(Channel, #'basic.ack'{delivery_tag = DeliveryTag}).
