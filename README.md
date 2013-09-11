@@ -40,7 +40,8 @@ Make request:
 
 {ok, ResponsePayload} = rmql_rpc_client:call(RPCClient, Payload).
 
-%% Also you can define ContentType and QueueName (Routing Key)
+%% Also you can define ContentType or/and QueueName (Routing Key)
+{ok, ResponsePayload} = rmql_rpc_client:call(RPCClient, Payload, ContentType).
 {ok, ResponsePayload} = rmql_rpc_client:call(RPCClient, ContentType, Payload, QueueName).
 ```
 
@@ -69,6 +70,10 @@ process(_ReqContentType, _ReqPayload) -> <<"Hello">>.
 
 %% Also function can return response content type
 my_function(_) -> {<<"GreetingResponse">>, <<"Hello">>}.
+
+%% OR noreply atom to skip response
+
+my_function(_) -> noreply.
 ```
 
 ## Consumer
