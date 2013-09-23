@@ -1,7 +1,5 @@
 -module(rmql).
 
--compile([{parse_transform, lager_transform}]).
-
 -include_lib("amqp_client/include/amqp_client.hrl").
 
 -export([connection_start/0, connection_close/1]).

@@ -130,11 +130,13 @@ handle_info(amqp_available, St = #st{}) ->
 	{noreply, setup_channel(St)};
 
 handle_info(Down = #'DOWN'{ref = Ref}, St = #st{chan_mon_ref = Ref, survive = false}) ->
-	lager:error("rmql_rpc_srv (~p): amqp channel down (~p)", [St#st.routing_key, Down#'DOWN'.info]),
+	error_logger:error_msg("rmql_rpc_srv (~p): amqp channel down (~p)~n",
+			[St#st.routing_key, Down#'DOWN'.info]),
 	{stop, amqp_channel_down, St#st{channel = undefined}};
 
 handle_info(Down = #'DOWN'{ref = Ref}, St = #st{chan_mon_ref = Ref, survive = true}) ->
-	lager:warning("rmql_rpc_srv (~p): amqp channel down (~p)", [St#st.routing_key, Down#'DOWN'.info]),
+	error_logger:warning_msg("rmql_rpc_srv (~p): amqp channel down (~p)~n",
+			[St#st.routing_key, Down#'DOWN'.info]),
 	{noreply, setup_channel(St#st{channel = undefined})};
 
 handle_info({#'basic.consume'{}, _Pid}, State) ->
@@ -181,7 +183,7 @@ code_change(_OldVsn, State, _Extra) ->
 setup_channel(St) ->
 	case rmql:channel_open() of
 		{ok, Channel} ->
-			lager:info("rmql_rpc_client (~p): connected", [St#st.routing_key]),
+			error_logger:info_msg("rmql_rpc_client (~p): connected~n", [St#st.routing_key]),
 			MonRef = erlang:monitor(process, Channel),
 		    #'queue.declare_ok'{queue = Q} =
 		        amqp_channel:call(Channel, #'queue.declare'{auto_delete = true}),
