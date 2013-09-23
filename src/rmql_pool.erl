@@ -4,6 +4,8 @@
 
 -behaviour(gen_server).
 
+-ignore_xref([{start_link, 0}]).
+
 %% API exports
 -export([start_link/0,
          open_channel/0,

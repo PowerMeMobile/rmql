@@ -9,6 +9,15 @@
 
 -behaviour(gen_server).
 
+%% Let xref ignore library API
+-ignore_xref([
+	{start_link, 1},
+	{start_link, 2},
+	{call, 2},
+	{call, 3},
+	{call, 4}
+]).
+
 -export([
 	start_link/1, start_link/2,
 	call/2, call/3, call/4

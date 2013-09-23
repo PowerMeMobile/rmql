@@ -8,6 +8,8 @@
 
 -include_lib("amqp_client/include/amqp_client.hrl").
 
+-ignore_xref([{start_link, 3}]).
+
 -export([
 	init/1,
 	handle_call/3,

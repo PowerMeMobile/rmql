@@ -2,6 +2,27 @@
 
 -include_lib("amqp_client/include/amqp_client.hrl").
 
+%% Let xref ignore library API
+-ignore_xref([
+	{connection_start, 0},
+	{connection_close, 1},
+	{channel_open, 0},
+	{channel_open, 1},
+	{channel_close, 1},
+	{exchange_declare, 4},
+	{queue_declare, 3},
+	{queue_declare, 5},
+	{queue_bind, 3},
+	{basic_qos, 2},
+	{basic_consume, 3},
+	{basic_cancel, 2},
+	{basic_publish, 4},
+	{basic_ack, 2},
+	{basic_reject, 3},
+	{tx_select, 1},
+	{tx_commit, 1}
+]).
+
 -export([connection_start/0, connection_close/1]).
 -export([channel_open/0, channel_open/1, channel_close/1]).
 -export([exchange_declare/4]).

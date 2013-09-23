@@ -7,6 +7,8 @@
 
 -behaviour(gen_server).
 
+-ignore_xref([{start_link, 3}]).
+
 -include_lib("amqp_client/include/amqp_client.hrl").
 
 -export([
