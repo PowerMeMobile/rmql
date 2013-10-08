@@ -35,6 +35,7 @@
 	chan_mon_ref :: reference(),
 	queue :: binary(),
 	survive :: boolean(),
+	props :: [term()],
 
 	%% for step only (temp fields)
 	dtag :: pos_integer(),
@@ -47,15 +48,43 @@
 %% API
 %% ===================================================================
 
--spec start_link(atom(), binary(), function()) -> {ok, pid()}.
-start_link(Name, Queue, Fun) ->
-    gen_server:start_link({local, Name}, ?MODULE, [Queue, Fun], []).
+-spec start_link(atom(), list() | binary(), function()) ->
+	{ok, pid()} |
+	{error, more_than_one_queue_defined} |
+	{error, subscribe_queue_undef}.
+start_link(Name, Queue, Fun) when
+		is_atom(Name) andalso
+		is_binary(Queue) andalso
+		is_function(Fun) ->
+	Props = [
+		#'queue.declare'{
+		queue = Queue
+	},
+	#'basic.consume'{
+		queue = Queue
+	}],
+    gen_server:start_link({local, Name}, ?MODULE, [Queue, Props, Fun], []);
+start_link(Name, Props, Fun) when
+		is_atom(Name) andalso
+		is_list(Props) andalso
+		is_function(Fun) ->
+	Filter =
+	fun(#'basic.consume'{}) -> true;
+		(_) -> false
+	end,
+	case lists:filter(Filter, Props) of
+		[] -> {error, subscribe_queue_undef};
+	   	[_BC1, _BC2 | _] ->
+			{error, more_than_one_queue_defined};
+		[#'basic.consume'{queue = Q}] when is_binary(Q) ->
+			gen_server:start_link({local, Name}, ?MODULE, [Q, Props, Fun], [])
+	end.
 
 %% ===================================================================
 %% gen_server callbacks
 %% ===================================================================
 
-init([Queue, Fun]) ->
+init([Queue, Props, Fun]) ->
 	{ok, IsSurvive} = application:get_env(rmql, survive),
     FunArity = case erlang:fun_info(Fun, arity) of
 		{arity, 1} -> 1;
@@ -65,7 +94,8 @@ init([Queue, Fun]) ->
 		survive = IsSurvive,
 		queue = Queue,
 		handler = Fun,
-		fun_arity = FunArity
+		fun_arity = FunArity,
+		props = Props
 	},
 	case setup_channel(St) of
 		#st{channel = undefined, survive = false} -> {stop, amqp_unavailable};
@@ -127,13 +157,14 @@ code_change(_OldVsn, State, _Extra) ->
 %% Internals
 %% ===================================================================
 
-setup_channel(St) ->
+setup_channel(St = #st{props = Props}) ->
 	case rmql:channel_open() of
 		{ok, Channel} ->
 			error_logger:info_msg("rmql_rpc_server (~s): connected~n", [St#st.queue]),
+			ok = set_qos(Channel, get_qos(Props)),
 			MonRef = erlang:monitor(process, Channel),
-		    amqp_channel:call(Channel, #'queue.declare'{queue = St#st.queue}),
-		    amqp_channel:call(Channel, #'basic.consume'{queue = St#st.queue}),
+			[ok = queue_declare(Channel, QDeclare) || QDeclare <- get_queue_declare(Props)],
+			{ok, _ConsumerTag} = basic_consume(Channel, get_basic_consume(Props)),
 		    St#st{
 				channel = Channel,
 				chan_mon_ref = MonRef};
@@ -150,6 +181,8 @@ step(process, St = #st{fun_arity = 2}) ->
 	Fun = St#st.handler,
 	step(respond, St#st{response = Fun(ContentType, St#st.payload)});
 
+step(respond, St = #st{response = reject}) ->
+	step(reject, St);
 step(respond, St = #st{response = noreply}) ->
 	step(ack, St);
 step(respond, St = #st{response = RespPayload}) when is_binary(RespPayload) ->
@@ -190,4 +223,68 @@ step(respond, St = #st{response = {RespContentType, RespPayload}}) when
 	step(ack, St);
 
 step(ack, #st{channel = Channel, dtag = DeliveryTag}) ->
-    amqp_channel:call(Channel, #'basic.ack'{delivery_tag = DeliveryTag}).
+    amqp_channel:call(Channel, #'basic.ack'{delivery_tag = DeliveryTag});
+
+step(reject, #st{channel = Channel, dtag = DeliveryTag}) ->
+	Method =
+	#'basic.reject'{
+		delivery_tag = DeliveryTag,
+		requeue = false
+	},
+    amqp_channel:call(Channel, Method).
+
+queue_declare(Chan, QueueDelare = #'queue.declare'{}) ->
+    try amqp_channel:call(Chan, QueueDelare) of
+        #'queue.declare_ok'{} -> ok;
+        Other                 -> {error, Other}
+    catch
+        _:Reason -> {error, Reason}
+    end.
+
+get_queue_declare(Props) ->
+	Filter =
+	fun(#'queue.declare'{}) -> true;
+		(_) -> false
+	end,
+	lists:filter(Filter, Props).
+
+basic_consume(Chan, BasicConsume = #'basic.consume'{}) ->
+    try
+        amqp_channel:subscribe(Chan, BasicConsume, self()),
+        receive
+            #'basic.consume_ok'{consumer_tag = ConsumerTag} ->
+                {ok, ConsumerTag}
+        after
+            10000 -> {error, timeout}
+        end
+    catch
+        _:Reason -> {error, Reason}
+    end.
+
+get_basic_consume(Props) ->
+	Filter =
+	fun(#'basic.consume'{}) -> true;
+		(_) -> false
+	end,
+	[BasicConsume] = lists:filter(Filter, Props),
+	BasicConsume.
+
+set_qos(_Chan, undefined) -> ok;
+set_qos(Chan, QOS = #'basic.qos'{}) ->
+	try amqp_channel:call(Chan, QOS) of
+		#'basic.qos_ok'{} -> ok;
+		Any -> {error, Any}
+	catch
+		_Class:Error -> {error, Error}
+	end.
+
+get_qos(Props) ->
+	Filter =
+	fun(#'basic.qos'{}) -> true;
+		(_) -> false
+	end,
+	case lists:filter(Filter, Props) of
+		[QOS] -> QOS;
+		[] -> undefined;
+		[_,_ | _] -> error(more_than_one_qos_declaration)
+	end.
