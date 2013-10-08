@@ -60,7 +60,7 @@ connection_close(Conn) ->
 %% Channel methods
 %% -------------------------------------------------------------------------
 
--spec channel_open() -> {'ok', pid()} | {'error', any()}.
+-spec channel_open() -> {'ok', pid()} | {'error', any()} | unavailable.
 channel_open() ->
 	rmql_pool:open_channel().
 

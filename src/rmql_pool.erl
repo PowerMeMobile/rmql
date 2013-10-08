@@ -34,9 +34,9 @@
 start_link() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
--spec open_channel() -> {ok, pid()}.
+-spec open_channel() -> {ok, pid()} | {error, term()} | unavailable.
 open_channel() ->
-    gen_server:call(?MODULE, open_channel, infinity).
+    gen_server:call(?MODULE, open_channel).
 
 -spec close_channel(pid()) -> ok.
 close_channel(Chan) ->
