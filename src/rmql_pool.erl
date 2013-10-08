@@ -72,6 +72,13 @@ handle_call(open_channel, {Pid, _Tag}, St) ->
             Ref = monitor(process, Pid),
             ets:insert(?MODULE, {Ref, Chan}),
             {reply, {ok, Chan}, St};
+		closing ->
+			error_logger:warning_msg("rmql_pool: connection closing. reconnect~n"),
+			unlink(St#st.conn),
+		    catch(amqp_connection:close(St#st.conn)),
+			schedule_connect(0),
+			NewList = [Pid | St#st.pid_list],
+			{reply, unavailable, St#st{conn = undefined, pid_list = NewList}};
         {error, Reason} ->
             {stop, {error, Reason}, St}
     end.
