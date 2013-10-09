@@ -15,6 +15,7 @@
 	{queue_bind, 3},
 	{basic_qos, 2},
 	{basic_consume, 3},
+	{basic_consume, 2},
 	{basic_cancel, 2},
 	{basic_publish, 4},
 	{basic_ack, 2},
@@ -27,7 +28,8 @@
 -export([channel_open/0, channel_open/1, channel_close/1]).
 -export([exchange_declare/4]).
 -export([queue_declare/3, queue_declare/5, queue_bind/3]).
--export([basic_qos/2, basic_consume/3, basic_cancel/2]).
+-export([basic_consume/2, basic_consume/3, basic_cancel/2]).
+-export([basic_qos/2]).
 -export([basic_publish/4, basic_ack/2, basic_reject/3]).
 -export([tx_select/1, tx_commit/1]).
 
@@ -144,14 +146,18 @@ basic_qos(Chan, PrefetchCount) ->
 -spec basic_consume(pid(), binary(), boolean()) ->
                     {'ok', binary()} | {'error', any()}.
 basic_consume(Chan, Queue, NoAck) ->
-    Method = #'basic.consume'{queue = Queue, no_ack = NoAck},
+	basic_consume(Chan, #'basic.consume'{queue = Queue, no_ack = NoAck}).
+
+-spec basic_consume(pid(), #'basic.consume'{}) ->
+                    {'ok', binary()} | {'error', any()}.
+basic_consume(Chan, BasicConsume = #'basic.consume'{}) ->
     try
-        amqp_channel:subscribe(Chan, Method, self()),
+        amqp_channel:subscribe(Chan, BasicConsume, self()),
         receive
             #'basic.consume_ok'{consumer_tag = ConsumerTag} ->
                 {ok, ConsumerTag}
         after
-            10000 -> {error, timeout}
+            5000 -> {error, timeout}
         end
     catch
         _:Reason -> {error, Reason}

@@ -121,18 +121,6 @@ handle_info(Down = #'DOWN'{ref = Ref}, St = #st{chan_mon_ref = Ref, survive = tr
 			[St#st.queue, Down#'DOWN'.info]),
 	{noreply, setup_channel(St)};
 
-handle_info({#'basic.consume'{}, _}, State) ->
-    {noreply, State};
-
-handle_info(#'basic.consume_ok'{}, State) ->
-    {noreply, State};
-
-handle_info(#'basic.cancel'{}, State) ->
-    {noreply, State};
-
-handle_info(#'basic.cancel_ok'{}, State) ->
-    {stop, normal, State};
-
 handle_info({#'basic.deliver'{delivery_tag = DeliveryTag},
              #amqp_msg{props = Props, payload = Payload}}, St = #st{}) ->
 	St1 = St#st{
@@ -164,7 +152,7 @@ setup_channel(St = #st{props = Props}) ->
 			ok = set_qos(Channel, get_qos(Props)),
 			MonRef = erlang:monitor(process, Channel),
 			[ok = queue_declare(Channel, QDeclare) || QDeclare <- get_queue_declare(Props)],
-			{ok, _ConsumerTag} = basic_consume(Channel, get_basic_consume(Props)),
+			{ok, _ConsumerTag} = rmql:basic_consume(Channel, get_basic_consume(Props)),
 		    St#st{
 				channel = Channel,
 				chan_mon_ref = MonRef};
@@ -247,19 +235,6 @@ get_queue_declare(Props) ->
 		(_) -> false
 	end,
 	lists:filter(Filter, Props).
-
-basic_consume(Chan, BasicConsume = #'basic.consume'{}) ->
-    try
-        amqp_channel:subscribe(Chan, BasicConsume, self()),
-        receive
-            #'basic.consume_ok'{consumer_tag = ConsumerTag} ->
-                {ok, ConsumerTag}
-        after
-            10000 -> {error, timeout}
-        end
-    catch
-        _:Reason -> {error, Reason}
-    end.
 
 get_basic_consume(Props) ->
 	Filter =
