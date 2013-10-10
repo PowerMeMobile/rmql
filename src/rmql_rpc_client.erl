@@ -148,18 +148,6 @@ handle_info(Down = #'DOWN'{ref = Ref}, St = #st{chan_mon_ref = Ref, survive = tr
 			[St#st.routing_key, Down#'DOWN'.info]),
 	{noreply, setup_channel(St#st{channel = undefined})};
 
-handle_info({#'basic.consume'{}, _Pid}, State) ->
-    {noreply, State};
-
-handle_info(#'basic.consume_ok'{}, State) ->
-    {noreply, State};
-
-handle_info(#'basic.cancel'{}, State) ->
-    {noreply, State};
-
-handle_info(#'basic.cancel_ok'{}, State) ->
-    {stop, normal, State};
-
 handle_info({#'basic.deliver'{},
              #amqp_msg{props = #'P_basic'{correlation_id = <<CorrID:64>>},
                        payload = Payload}}, St = #st{}) ->
@@ -176,7 +164,7 @@ handle_info({#'basic.return'{reply_code = 312}, AMQPMsg = #amqp_msg{}}, St = #st
     {noreply, St#st{continuations = dict:erase(CorrelationID, St#st.continuations)}};
 
 handle_info(Msg, St) ->
-	{{unexpected_info, Msg}, St}.
+	{stop, {unexpected_info, Msg}, St}.
 
 terminate(_Reason, #st{channel = Channel}) ->
     amqp_channel:close(Channel),
@@ -203,7 +191,8 @@ setup_channel(St) ->
 						amqp_channel:call(Channel, #'queue.declare'{queue = RoutingKey})
 			end,
 			amqp_channel:register_return_handler(Channel, self()),
-		    amqp_channel:call(Channel, #'basic.consume'{no_ack = true, queue = Q}),
+		    {ok, _CTag} =
+				rmql:basic_consume(Channel, #'basic.consume'{no_ack = true, queue = Q}),
 			St#st{reply_queue = Q, chan_mon_ref = MonRef, channel = Channel};
 		unavailable -> St
 	end.
