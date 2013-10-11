@@ -1,7 +1,6 @@
 -module(rmql_rpc_client).
 
 %% @TODO
-%% purge dict timeout
 %% dedicated connection
 %% fun specs
 
@@ -31,6 +30,8 @@
 	code_change/3
 ]).
 
+-define(CLEAN_DICT_INTERVAL, 30000).
+
 -record('DOWN',{
 	ref 			:: reference(),
 	type = process 	:: process,
@@ -43,7 +44,7 @@
 	chan_mon_ref :: reference(),
 	reply_queue :: binary(),
 	routing_key :: binary(),
-	continuations = dict:new(),
+	dict = dict:new(),
 	correlation_id = 0 :: non_neg_integer(),
 	survive = false :: boolean()
 }).
@@ -107,7 +108,7 @@ init([RoutingKey]) ->
 	},
 	case setup_channel(St) of
 		#st{channel = undefined, survive = false} -> {stop, amqp_unavailable};
-		St2 = #st{} -> {ok, St2}
+		St2 = #st{} -> {ok, St2, ?CLEAN_DICT_INTERVAL}
 	end.
 
 handle_call({call, _}, _From, St = #st{channel = undefined}) ->
@@ -151,17 +152,29 @@ handle_info(Down = #'DOWN'{ref = Ref}, St = #st{chan_mon_ref = Ref, survive = tr
 handle_info({#'basic.deliver'{},
              #amqp_msg{props = #'P_basic'{correlation_id = <<CorrID:64>>},
                        payload = Payload}}, St = #st{}) ->
-    From = dict:fetch(CorrID, St#st.continuations),
+    {From, _T} = dict:fetch(CorrID, St#st.dict),
     gen_server:reply(From, {ok, Payload}),
-    {noreply, St#st{continuations = dict:erase(CorrID, St#st.continuations)}};
+    {noreply, St#st{dict = dict:erase(CorrID, St#st.dict)}};
 
 %% reply_text = <<"NO_ROUTE">>
 handle_info({#'basic.return'{reply_code = 312}, AMQPMsg = #amqp_msg{}}, St = #st{}) ->
 	BasicProps = AMQPMsg#amqp_msg.props,
 	<<CorrelationID:64>> = BasicProps#'P_basic'.correlation_id,
-    From = dict:fetch(CorrelationID, St#st.continuations),
+    {From, _T} = dict:fetch(CorrelationID, St#st.dict),
 	gen_server:reply(From, {error, non_routable}),
-    {noreply, St#st{continuations = dict:erase(CorrelationID, St#st.continuations)}};
+    {noreply, St#st{dict = dict:erase(CorrelationID, St#st.dict)}};
+
+%% process timeout CLEAN_DICT_INTERVAL
+handle_info(timeout, St) ->
+	Now = os:timestamp(),
+	Filter = fun(_CorrelationID, {_From, SentAt}) ->
+		case timer:now_diff(Now, SentAt) of
+			MicSecs when MicSecs > 5000000 -> false;
+			_ -> true
+		end
+	end,
+	NewDict = dict:filter(Filter, St#st.dict),
+	{noreply, St#st{dict = NewDict}, ?CLEAN_DICT_INTERVAL};
 
 handle_info(Msg, St) ->
 	{stop, {unexpected_info, Msg}, St}.
@@ -206,7 +219,7 @@ publish(ContentType, Payload, RoutingKey, From, St) ->
 		channel = Channel,
 		reply_queue = Q,
 		correlation_id = CorrelationId,
-		continuations = Continuations
+		dict = Dict
 	} = St,
     Props = #'P_basic'{
 		correlation_id = <<CorrelationId:64>>,
@@ -220,4 +233,4 @@ publish(ContentType, Payload, RoutingKey, From, St) ->
 	AMQPMsg = #amqp_msg{props = Props, payload = Payload},
     amqp_channel:call(Channel, Publish, AMQPMsg),
     St#st{correlation_id = CorrelationId + 1,
-                continuations = dict:store(CorrelationId, From, Continuations)}.
+                dict = dict:store(CorrelationId, {From, os:timestamp()}, Dict)}.
