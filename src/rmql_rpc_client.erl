@@ -101,6 +101,8 @@ call(RpcClient, ContentType, Payload, Queue) ->
 init([]) ->
 	init([undefined]);
 init([RoutingKey]) ->
+	process_flag(trap_exit, true), %% to unregister return handler on terminate
+	%% and avoid error
 	{ok, IsSurvive} = application:get_env(rmql, survive),
 	St = #st{
 		routing_key = RoutingKey,
@@ -179,8 +181,13 @@ handle_info(timeout, St) ->
 handle_info(Msg, St) ->
 	{stop, {unexpected_info, Msg}, St}.
 
+terminate(_Reason, #st{channel = undefined}) ->
+	ok;
 terminate(_Reason, #st{channel = Channel}) ->
-    amqp_channel:close(Channel),
+	%% to unregister return handler on terminate
+	%% and avoid error
+	amqp_channel:unregister_return_handler(Channel),
+    catch(amqp_channel:close(Channel)),
     ok.
 
 code_change(_OldVsn, State, _Extra) ->
