@@ -127,7 +127,7 @@ handle_info(Down = #'DOWN'{ref = Ref}, St = #st{chan_mon_ref = Ref, survive = tr
 %% worker failed
 handle_info(#'DOWN'{ref = Ref}, St = #st{}) ->
 	error_logger:warning_msg("Got worker DOWN msg~n"),
-    case ets:match(?MODULE, {'$1', Ref}) of
+    case ets:match(St#st.tid, {'$1', Ref}) of
         [[DTag]] ->
             ets:delete(St#st.tid, DTag),
 			%% call nack with no requeu to avoid recursive error
