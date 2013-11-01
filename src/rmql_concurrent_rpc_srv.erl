@@ -125,8 +125,8 @@ handle_info(Down = #'DOWN'{ref = Ref}, St = #st{chan_mon_ref = Ref, survive = tr
 	{noreply, setup_channel(St)};
 
 %% worker failed
-handle_info(#'DOWN'{ref = Ref}, St = #st{}) ->
-	error_logger:warning_msg("Got worker DOWN msg~n"),
+handle_info(#'DOWN'{ref = Ref, info = Reason}, St = #st{}) ->
+	error_logger:warning_msg("rmql_concurrent_rpc_srv: worker down (~p)~n", [Reason]),
     case ets:match(St#st.tid, {'$1', Ref}) of
         [[DTag]] ->
             ets:delete(St#st.tid, DTag),
