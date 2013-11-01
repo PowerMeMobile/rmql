@@ -162,6 +162,8 @@ setup_channel(St = #st{props = Props}) ->
 			ok = set_qos(Channel, get_qos(Props)),
 			MonRef = erlang:monitor(process, Channel),
 			[ok = queue_declare(Channel, QDeclare) || QDeclare <- get_queue_declare(Props)],
+			[ok = exchange_declare(Channel, EDeclare) || EDeclare <- get_exch_declare(Props)],
+			[ok = queue_bind(Channel, QBind) || QBind <- get_queue_bind(Props)],
 			{ok, _ConsumerTag} = rmql:basic_consume(Channel, get_basic_consume(Props)),
 		    St#st{
 				channel = Channel,
@@ -223,6 +225,36 @@ queue_declare(Chan, QueueDelare = #'queue.declare'{}) ->
 get_queue_declare(Props) ->
 	Filter =
 	fun(#'queue.declare'{}) -> true;
+		(_) -> false
+	end,
+	lists:filter(Filter, Props).
+
+exchange_declare(Channel, ExchangeDeclare = #'exchange.declare'{}) ->
+    try amqp_channel:call(Channel, ExchangeDeclare) of
+		#'exchange.declare_ok'{} -> ok;
+        Other                 -> {error, Other}
+    catch
+        _:Reason -> {error, Reason}
+    end.
+
+get_exch_declare(Props) ->
+	Filter =
+	fun(#'exchange.declare'{}) -> true;
+		(_) -> false
+	end,
+	lists:filter(Filter, Props).
+
+queue_bind(Channel, QueueBind = #'queue.bind'{}) ->
+	try amqp_channel:call(Channel, QueueBind) of
+		#'queue.bind_ok'{} -> ok;
+        Other -> {error, Other}
+    catch
+        _:Reason -> {error, Reason}
+    end.
+
+get_queue_bind(Props) ->
+	Filter =
+	fun(#'queue.bind'{}) -> true;
 		(_) -> false
 	end,
 	lists:filter(Filter, Props).
