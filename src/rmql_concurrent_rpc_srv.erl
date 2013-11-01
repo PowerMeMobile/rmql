@@ -192,6 +192,10 @@ spawn_worker(Req, St = #st{}) ->
 	MonRef = monitor(process, Pid),
 	true = ets:insert(St#st.tid, {DTag, MonRef}).
 
+process_reply(Req, ack, St) ->
+	{#'basic.deliver'{delivery_tag = DTag},	#amqp_msg{}} = Req,
+	Channel = St#st.channel,
+	ok = rmql:basic_ack(Channel, DTag);
 process_reply(Req, reject, St) ->
 	{#'basic.deliver'{delivery_tag = DTag},
 		#amqp_msg{}} = Req,
