@@ -4,6 +4,7 @@
 
 %% Let xref ignore library API
 -ignore_xref([
+	{start, 1},
 	{connection_start, 0},
 	{connection_close, 1},
 	{channel_open, 0},
@@ -24,6 +25,7 @@
 	{tx_commit, 1}
 ]).
 
+-export([start/1]).
 -export([connection_start/0, connection_close/1]).
 -export([channel_open/0, channel_open/1, channel_close/1]).
 -export([exchange_declare/4]).
@@ -36,6 +38,23 @@
 %% -------------------------------------------------------------------------
 %% Connection methods
 %% -------------------------------------------------------------------------
+
+-spec start([{atom(), term()}]) -> ok.
+%% Props is a proplist
+%% Available settings are:
+%% host, port, virtual_host, username, password, survive
+start(Props) ->
+	Survive = proplists:get_value(survive, Props, false),
+	AmqpProps = [
+		{host, proplists:get_value(host, Props, "localhost")},
+		{port, proplists:get_value(port, Props)},
+		{vhost, proplists:get_value(virtual_host, Props, <<"/">>)},
+		{username, proplists:get_value(username, Props, <<"guest">>)},
+		{password, proplists:get_value(password, Props, <<"guest">>)}
+	],
+	application:set_env(rmql, amqp_props, AmqpProps),
+	application:set_env(rmql, survive, Survive),
+	application:start(rmql).
 
 -spec connection_start() -> {'ok', pid()} | {'error', any()}.
 connection_start() ->
