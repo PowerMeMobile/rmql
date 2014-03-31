@@ -7,6 +7,8 @@
 
 -behaviour(gen_server).
 
+-ignore_xref([{start_link, 3}]).
+
 -include_lib("amqp_client/include/amqp_client.hrl").
 
 -export([
@@ -77,11 +79,13 @@ handle_info(amqp_available, St = #st{}) ->
 	{noreply, setup_channel(St)};
 
 handle_info(Down = #'DOWN'{ref = Ref}, St = #st{chan_mon_ref = Ref, survive = false}) ->
-	lager:error("rmql_consumer (~p): amqp channel down (~p)", [St#st.queue, Down#'DOWN'.info]),
+	error_logger:error_msg("rmql_consumer (~s): amqp channel down (~p)~n",
+		[St#st.queue, Down#'DOWN'.info]),
 	{stop, amqp_channel_down, St};
 
 handle_info(Down = #'DOWN'{ref = Ref}, St = #st{chan_mon_ref = Ref, survive = true}) ->
-	lager:warning("rmql_consumer (~p): amqp channel down (~p)", [St#st.queue, Down#'DOWN'.info]),
+	error_logger:warning_msg("rmql_consumer (~s): amqp channel down (~p)~n",
+		[St#st.queue, Down#'DOWN'.info]),
 	{noreply, setup_channel(St)};
 
 handle_info({#'basic.consume'{}, _}, State) ->
@@ -124,7 +128,7 @@ code_change(_OldVsn, State, _Extra) ->
 setup_channel(St) ->
 	case rmql:channel_open() of
 		{ok, Channel} ->
-			lager:info("rmql_consumer (~p): connected", [St#st.queue]),
+			error_logger:info_msg("rmql_consumer (~s): connected~n", [St#st.queue]),
 			MonRef = erlang:monitor(process, Channel),
 		    amqp_channel:call(Channel, St#st.queue_spec),
 		    amqp_channel:call(Channel, #'basic.consume'{queue = St#st.queue}),

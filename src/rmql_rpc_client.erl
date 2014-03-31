@@ -1,13 +1,21 @@
 -module(rmql_rpc_client).
 
 %% @TODO
-%% purge dict timeout
 %% dedicated connection
 %% fun specs
 
 -include_lib("amqp_client/include/amqp_client.hrl").
 
 -behaviour(gen_server).
+
+%% Let xref ignore library API
+-ignore_xref([
+	{start_link, 1},
+	{start_link, 2},
+	{call, 2},
+	{call, 3},
+	{call, 4}
+]).
 
 -export([
 	start_link/1, start_link/2,
@@ -22,6 +30,8 @@
 	code_change/3
 ]).
 
+-define(CLEAN_DICT_INTERVAL, 30000).
+
 -record('DOWN',{
 	ref 			:: reference(),
 	type = process 	:: process,
@@ -34,7 +44,7 @@
 	chan_mon_ref :: reference(),
 	reply_queue :: binary(),
 	routing_key :: binary(),
-	continuations = dict:new(),
+	dict = dict:new(),
 	correlation_id = 0 :: non_neg_integer(),
 	survive = false :: boolean()
 }).
@@ -51,7 +61,7 @@ start_link(Name) ->
 start_link(Name, Queue) when is_atom(Name) ->
     gen_server:start_link({local, Name}, ?MODULE, [Queue], []).
 
--spec call(pid(), binary()) ->
+-spec call(pid() | atom(), binary()) ->
 	{ok, binary()} |
 	{error, timeout} |
 	{error, disconnected} |
@@ -62,7 +72,7 @@ call(RpcClient, Payload) ->
 		_:{timeout, _} -> {error, timeout}
 	end.
 
--spec call(pid(), binary(), binary()) ->
+-spec call(pid() | atom(), binary(), binary()) ->
 	{ok, binary()} |
 	{error, timeout} |
 	{error, disconnected} |
@@ -73,7 +83,7 @@ call(RpcClient, Payload, ContentType) ->
 		_:{timeout, _} -> {error, timeout}
 	end.
 
--spec call(pid(), binary(), binary(), binary()) ->
+-spec call(pid() | atom(), binary(), binary(), binary()) ->
 	{ok, binary()} |
 	{error, timeout} |
 	{error, disconnected} |
@@ -91,6 +101,8 @@ call(RpcClient, ContentType, Payload, Queue) ->
 init([]) ->
 	init([undefined]);
 init([RoutingKey]) ->
+	process_flag(trap_exit, true), %% to unregister return handler on terminate
+	%% and avoid error
 	{ok, IsSurvive} = application:get_env(rmql, survive),
 	St = #st{
 		routing_key = RoutingKey,
@@ -98,7 +110,7 @@ init([RoutingKey]) ->
 	},
 	case setup_channel(St) of
 		#st{channel = undefined, survive = false} -> {stop, amqp_unavailable};
-		St2 = #st{} -> {ok, St2}
+		St2 = #st{} -> {ok, St2, ?CLEAN_DICT_INTERVAL}
 	end.
 
 handle_call({call, _}, _From, St = #st{channel = undefined}) ->
@@ -130,45 +142,52 @@ handle_info(amqp_available, St = #st{}) ->
 	{noreply, setup_channel(St)};
 
 handle_info(Down = #'DOWN'{ref = Ref}, St = #st{chan_mon_ref = Ref, survive = false}) ->
-	lager:error("rmql_rpc_srv (~p): amqp channel down (~p)", [St#st.routing_key, Down#'DOWN'.info]),
+	error_logger:error_msg("rmql_rpc_srv (~s): amqp channel down (~p)~n",
+			[St#st.routing_key, Down#'DOWN'.info]),
 	{stop, amqp_channel_down, St#st{channel = undefined}};
 
 handle_info(Down = #'DOWN'{ref = Ref}, St = #st{chan_mon_ref = Ref, survive = true}) ->
-	lager:warning("rmql_rpc_srv (~p): amqp channel down (~p)", [St#st.routing_key, Down#'DOWN'.info]),
+	error_logger:warning_msg("rmql_rpc_srv (~s): amqp channel down (~p)~n",
+			[St#st.routing_key, Down#'DOWN'.info]),
 	{noreply, setup_channel(St#st{channel = undefined})};
-
-handle_info({#'basic.consume'{}, _Pid}, State) ->
-    {noreply, State};
-
-handle_info(#'basic.consume_ok'{}, State) ->
-    {noreply, State};
-
-handle_info(#'basic.cancel'{}, State) ->
-    {noreply, State};
-
-handle_info(#'basic.cancel_ok'{}, State) ->
-    {stop, normal, State};
 
 handle_info({#'basic.deliver'{},
              #amqp_msg{props = #'P_basic'{correlation_id = <<CorrID:64>>},
                        payload = Payload}}, St = #st{}) ->
-    From = dict:fetch(CorrID, St#st.continuations),
+    {From, _T} = dict:fetch(CorrID, St#st.dict),
     gen_server:reply(From, {ok, Payload}),
-    {noreply, St#st{continuations = dict:erase(CorrID, St#st.continuations)}};
+    {noreply, St#st{dict = dict:erase(CorrID, St#st.dict)}};
 
 %% reply_text = <<"NO_ROUTE">>
 handle_info({#'basic.return'{reply_code = 312}, AMQPMsg = #amqp_msg{}}, St = #st{}) ->
 	BasicProps = AMQPMsg#amqp_msg.props,
 	<<CorrelationID:64>> = BasicProps#'P_basic'.correlation_id,
-    From = dict:fetch(CorrelationID, St#st.continuations),
+    {From, _T} = dict:fetch(CorrelationID, St#st.dict),
 	gen_server:reply(From, {error, non_routable}),
-    {noreply, St#st{continuations = dict:erase(CorrelationID, St#st.continuations)}};
+    {noreply, St#st{dict = dict:erase(CorrelationID, St#st.dict)}};
+
+%% process timeout CLEAN_DICT_INTERVAL
+handle_info(timeout, St) ->
+	Now = os:timestamp(),
+	Filter = fun(_CorrelationID, {_From, SentAt}) ->
+		case timer:now_diff(Now, SentAt) of
+			MicSecs when MicSecs > 5000000 -> false;
+			_ -> true
+		end
+	end,
+	NewDict = dict:filter(Filter, St#st.dict),
+	{noreply, St#st{dict = NewDict}, ?CLEAN_DICT_INTERVAL};
 
 handle_info(Msg, St) ->
-	{{unexpected_info, Msg}, St}.
+	{stop, {unexpected_info, Msg}, St}.
 
+terminate(_Reason, #st{channel = undefined}) ->
+	ok;
 terminate(_Reason, #st{channel = Channel}) ->
-    amqp_channel:close(Channel),
+	%% to unregister return handler on terminate
+	%% and avoid error
+	amqp_channel:unregister_return_handler(Channel),
+    catch(amqp_channel:close(Channel)),
     ok.
 
 code_change(_OldVsn, State, _Extra) ->
@@ -181,7 +200,7 @@ code_change(_OldVsn, State, _Extra) ->
 setup_channel(St) ->
 	case rmql:channel_open() of
 		{ok, Channel} ->
-			lager:info("rmql_rpc_client (~p): connected", [St#st.routing_key]),
+			error_logger:info_msg("rmql_rpc_client (~s): connected~n", [St#st.routing_key]),
 			MonRef = erlang:monitor(process, Channel),
 		    #'queue.declare_ok'{queue = Q} =
 		        amqp_channel:call(Channel, #'queue.declare'{auto_delete = true}),
@@ -192,7 +211,8 @@ setup_channel(St) ->
 						amqp_channel:call(Channel, #'queue.declare'{queue = RoutingKey})
 			end,
 			amqp_channel:register_return_handler(Channel, self()),
-		    amqp_channel:call(Channel, #'basic.consume'{no_ack = true, queue = Q}),
+		    {ok, _CTag} =
+				rmql:basic_consume(Channel, #'basic.consume'{no_ack = true, queue = Q}),
 			St#st{reply_queue = Q, chan_mon_ref = MonRef, channel = Channel};
 		unavailable -> St
 	end.
@@ -206,7 +226,7 @@ publish(ContentType, Payload, RoutingKey, From, St) ->
 		channel = Channel,
 		reply_queue = Q,
 		correlation_id = CorrelationId,
-		continuations = Continuations
+		dict = Dict
 	} = St,
     Props = #'P_basic'{
 		correlation_id = <<CorrelationId:64>>,
@@ -220,4 +240,4 @@ publish(ContentType, Payload, RoutingKey, From, St) ->
 	AMQPMsg = #amqp_msg{props = Props, payload = Payload},
     amqp_channel:call(Channel, Publish, AMQPMsg),
     St#st{correlation_id = CorrelationId + 1,
-                continuations = dict:store(CorrelationId, From, Continuations)}.
+                dict = dict:store(CorrelationId, {From, os:timestamp()}, Dict)}.
