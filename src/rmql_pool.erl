@@ -17,11 +17,16 @@
          handle_info/2,
          code_change/3]).
 
--record(st, {amqp_conn :: pid(), amqp_chans :: ets:tid()}).
+-record(st, {
+	conn 			:: pid(),
+	pid_list = [] 	:: [pid()]
+}).
 
-%% -------------------------------------------------------------------------
+-define(RECONNECT_INTERVAL, 5000).
+
+%% ===================================================================
 %% API
-%% -------------------------------------------------------------------------
+%% ===================================================================
 
 -spec start_link() -> {'ok', pid()} | 'ignore' | {'error', any()}.
 start_link() ->
@@ -40,49 +45,80 @@ close_channel(Chan) ->
 %% -------------------------------------------------------------------------
 
 init([]) ->
-    lager:info("amqp pool: initializing", []),
-    case rmql:connection_start() of
-        {ok, Conn} ->
-            link(Conn),
-            {ok, #st{amqp_conn = Conn, amqp_chans = ets:new(amqp_chans, [])}};
-        {error, Reason} ->
-            lager:error("amqp pool: failed to start (~p)", [Reason]),
-            {stop, Reason}
-    end.
+    process_flag(trap_exit, true),
+    schedule_connect(0),
+    lager:info("rmql_pool: started"),
+	?MODULE = ets:new(?MODULE, [named_table]),
+    {ok, #st{}}.
 
-terminate(_Reason, _State) ->
-    ok.
+terminate(Reason, St) ->
+	case St#st.conn of
+		undefined -> ok;
+		Conn ->
+			unlink(Conn),
+		    catch(amqp_connection:close(Conn)),
+		    lager:info("rmql_pool: terminated (~p)", [Reason])
+	end.
+
+handle_call(open_channel, {Pid, _Tag}, St = #st{conn = undefined}) ->
+	NewList = [Pid | St#st.pid_list],
+	{reply, unavailable, St#st{pid_list = NewList}};
 
 handle_call(open_channel, {Pid, _Tag}, St) ->
-    case rmql:channel_open(St#st.amqp_conn) of
+    case rmql:channel_open(St#st.conn) of
         {ok, Chan} ->
             Ref = monitor(process, Pid),
-            ets:insert(St#st.amqp_chans, {Ref, Chan}),
+            ets:insert(?MODULE, {Ref, Chan}),
             {reply, {ok, Chan}, St};
         {error, Reason} ->
             {stop, {error, Reason}, St}
     end.
 
 handle_cast({close_channel, Chan}, St) ->
-    case ets:match(St#st.amqp_chans, {'$1', Chan}) of
+    case ets:match(?MODULE, {'$1', Chan}) of
         [[Ref]] ->
             demonitor(Ref),
-		    catch(amqp_channel:close(Chan)),
-            ets:delete(St#st.amqp_chans, Ref);
+            ets:delete(?MODULE, Ref);
         [] ->
             ignore
     end,
+    catch(amqp_channel:close(Chan)),
     {noreply, St}.
 
+handle_info({timeout, _Ref, connect}, St) ->
+    case rmql:connection_start() of
+        {ok, Conn} ->
+            link(Conn),
+            lager:info("rmql_pool: amqp connection up"),
+			[Pid ! amqp_available || Pid <- St#st.pid_list],
+			{noreply, St#st{conn = Conn, pid_list = []}};
+        {error, Reason} ->
+            lager:warning("rmql_pool: couldn't connect to the broker (~p)", [Reason]),
+            schedule_connect(?RECONNECT_INTERVAL),
+            {noreply, St}
+    end;
+
 handle_info(#'DOWN'{ref = Ref}, St) ->
-    case ets:lookup(St#st.amqp_chans, Ref) of
+    case ets:lookup(?MODULE, Ref) of
         [{_, Chan}] ->
-            rmql:channel_close(Chan),
-            ets:delete(St#st.amqp_chans, Ref);
+		    catch(amqp_channel:close(Chan)),
+            ets:delete(?MODULE, Ref);
         [] ->
             ignore
     end,
-    {noreply, St}.
+    {noreply, St};
+
+handle_info({'EXIT', Pid, Reason}, #st{conn = Pid} = St) ->
+    lager:warning("rmql_pool: amqp connection down (~p)", [Reason]),
+    schedule_connect(?RECONNECT_INTERVAL),
+    {noreply, St#st{conn = undefined}}.
 
 code_change(_OldVsn, St, _Extra) ->
     {ok, St}.
+
+%% ===================================================================
+%% Internals
+%% ===================================================================
+
+schedule_connect(Time) ->
+    erlang:start_timer(Time, self(), connect).

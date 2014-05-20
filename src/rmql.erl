@@ -259,10 +259,14 @@ prepare_basic_props(Props) ->
 		correlation_id = proplists:get_value(correlation_id, Props),
 		content_type = proplists:get_value(content_type, Props),
 		content_encoding = proplists:get_value(content_encoding, Props),
-		% delivery_mode = proplists:get_value(delivery_mode, Props, 2),
+		delivery_mode = proplists:get_value(delivery_mode, Props),
 		reply_to = proplists:get_value(reply_to, Props),
 		expiration = proplists:get_value(expiration, Props),
 		timestamp = proplists:get_value(timestamp, Props),
-		app_id = <<"kelly">>
-		% headers,priority,type,user_id,cluster_id
-		}.
+		app_id = proplists:get_value(app_id, Props),
+		headers = proplists:get_value(headers, Props),
+		priority = proplists:get_value(priority, Props),
+		type = proplists:get_value(type, Props),
+		user_id = proplists:get_value(user_id, Props),
+		cluster_id = proplists:get_value(cluster_id, Props)
+	}.

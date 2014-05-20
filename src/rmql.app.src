@@ -4,8 +4,11 @@
 	{registered, []},
 	{applications, [
 		kernel,
-		stdlib
+		stdlib,
+		lager
 	]},
 	{mod, {rmql_app, []}},
-	{env, []}
+	{env, [
+		{survive, false}
+	]}
 ]}.
