@@ -9,7 +9,7 @@
 -export([exchange_declare/4]).
 -export([queue_declare/3, queue_declare/5, queue_bind/3]).
 -export([basic_qos/2, basic_consume/3, basic_cancel/2]).
--export([basic_publish/4, basic_ack/2, basic_reject/3]).
+-export([basic_publish/4, basic_publish/5, basic_ack/2, basic_reject/3]).
 -export([tx_select/1, tx_commit/1]).
 
 %% -------------------------------------------------------------------------
@@ -152,10 +152,10 @@ basic_cancel(Chan, ConsumerTag) ->
         _:Reason -> {error, Reason}
     end.
 
--spec basic_publish(pid(), binary(), binary(), #'P_basic'{}) ->
-                    'ok' | {'error', any()}.
-basic_publish(Chan, RoutingKey, Payload, Props = #'P_basic'{}) ->
-    Method = #'basic.publish'{routing_key = RoutingKey},
+-spec basic_publish(pid(), binary(), binary(), binary(), #'P_basic'{} | list()) ->
+    'ok' | {'error', any()}.
+basic_publish(Chan, Exchange, RoutingKey, Payload, Props = #'P_basic'{}) ->
+    Method = #'basic.publish'{exchange = Exchange, routing_key = RoutingKey},
     Content = #amqp_msg{payload = Payload, props = Props},
     try amqp_channel:call(Chan, Method, Content) of
         ok    -> ok;
@@ -163,9 +163,14 @@ basic_publish(Chan, RoutingKey, Payload, Props = #'P_basic'{}) ->
     catch
         _:Reason -> {error, Reason}
     end;
-basic_publish(Chan, RoutingKey, Payload, PropList) ->
+basic_publish(Chan, Exchange, RoutingKey, Payload, PropList) ->
 	Props = prepare_basic_props(PropList),
-	basic_publish(Chan, RoutingKey, Payload, Props).
+	basic_publish(Chan, Exchange, RoutingKey, Payload, Props).
+
+-spec basic_publish(pid(), binary(), binary(), #'P_basic'{} | list()) ->
+    'ok' | {'error', any()}.
+basic_publish(Chan, RoutingKey, Payload, Props) ->
+    basic_publish(Chan, <<"">>, RoutingKey, Payload, Props).
 
 -spec basic_ack(pid(), non_neg_integer()) -> 'ok' | {'error', any()}.
 basic_ack(Chan, DeliveryTag) ->
