@@ -57,7 +57,8 @@ start_link(Name, Queue) when is_atom(Name) ->
 	{error, disconnected} |
 	{error, non_routable}.
 call(RpcClient, Payload) ->
-    try	gen_server:call(RpcClient, {call, Payload})
+    {ok, Timeout} = application:get_env(rmql, rpc_timeout),
+    try	gen_server:call(RpcClient, {call, Payload}, Timeout)
 	catch
 		_:{timeout, _} -> {error, timeout}
 	end.
@@ -68,7 +69,8 @@ call(RpcClient, Payload) ->
 	{error, disconnected} |
 	{error, non_routable}.
 call(RpcClient, Payload, ContentType) ->
-    try	gen_server:call(RpcClient, {call, Payload, ContentType})
+    {ok, Timeout} = application:get_env(rmql, rpc_timeout),
+    try	gen_server:call(RpcClient, {call, Payload, ContentType}, Timeout)
 	catch
 		_:{timeout, _} -> {error, timeout}
 	end.
@@ -79,7 +81,8 @@ call(RpcClient, Payload, ContentType) ->
 	{error, disconnected} |
 	{error, non_routable}.
 call(RpcClient, ContentType, Payload, Queue) ->
-	try gen_server:call(RpcClient, {call, ContentType, Payload, Queue})
+    {ok, Timeout} = application:get_env(rmql, rpc_timeout),
+	try gen_server:call(RpcClient, {call, ContentType, Payload, Queue}, Timeout)
 	catch
 		_:{timeout, _} -> {error, timeout}
 	end.
