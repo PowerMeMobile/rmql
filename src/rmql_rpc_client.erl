@@ -51,7 +51,7 @@ start_link(Name) ->
 start_link(Name, Queue) when is_atom(Name) ->
     gen_server:start_link({local, Name}, ?MODULE, [Queue], []).
 
--spec call(pid(), binary()) ->
+-spec call(atom() | pid(), binary()) ->
 	{ok, binary()} |
 	{error, timeout} |
 	{error, disconnected} |
@@ -63,7 +63,7 @@ call(RpcClient, Payload) ->
 		_:{timeout, _} -> {error, timeout}
 	end.
 
--spec call(pid(), binary(), binary()) ->
+-spec call(atom() | pid(), binary(), binary()) ->
 	{ok, binary()} |
 	{error, timeout} |
 	{error, disconnected} |
@@ -75,7 +75,7 @@ call(RpcClient, Payload, ContentType) ->
 		_:{timeout, _} -> {error, timeout}
 	end.
 
--spec call(pid(), binary(), binary(), binary()) ->
+-spec call(atom() | pid(), binary(), binary(), binary()) ->
 	{ok, binary()} |
 	{error, timeout} |
 	{error, disconnected} |
