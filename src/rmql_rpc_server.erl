@@ -2,7 +2,6 @@
 
 %% @TODO
 %% add multiprocessing support
-%% add try catch
 
 -behaviour(gen_server).
 
@@ -132,19 +131,38 @@ setup_channel(St) ->
 		    amqp_channel:call(Channel, #'basic.consume'{queue = St#st.queue}),
 		    St#st{
 				channel = Channel,
-				chan_mon_ref = MonRef};
+				chan_mon_ref = MonRef
+            };
 		unavailable -> St
 	end.
 
 step(process, St = #st{fun_arity = 1}) ->
 	Fun = St#st.handler,
-	step(respond, St#st{response = Fun(St#st.payload)});
+    Response =
+        try Fun(St#st.payload)
+        catch
+            Class:Error ->
+                Stacktrace = erlang:get_stacktrace(),
+                lager:error("Exception: ~p:~p, Stacktrace: ~p",
+                    [Class, Error, Stacktrace]),
+                noreply
+        end,
+	step(respond, St#st{response = Response});
 step(process, St = #st{fun_arity = 2}) ->
     #'P_basic'{
 		content_type = ContentType
 	} = St#st.bprops,
 	Fun = St#st.handler,
-	step(respond, St#st{response = Fun(ContentType, St#st.payload)});
+    Response =
+        try Fun(ContentType, St#st.payload)
+        catch
+            Class:Error ->
+                Stacktrace = erlang:get_stacktrace(),
+                lager:error("Exception: ~p:~p, ContentType: ~p, Stacktrace: ~p",
+                    [Class, Error, ContentType, Stacktrace]),
+                noreply
+        end,
+	step(respond, St#st{response = Response});
 
 step(respond, St = #st{response = noreply}) ->
 	step(ack, St);
