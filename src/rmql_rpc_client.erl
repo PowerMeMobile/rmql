@@ -132,11 +132,12 @@ handle_info(#'basic.cancel'{}, State) ->
 handle_info(#'basic.cancel_ok'{}, State) ->
     {stop, normal, State};
 
-handle_info({#'basic.deliver'{},
-             #amqp_msg{props = #'P_basic'{correlation_id = <<CorrID:64>>},
-                       payload = Payload}}, St = #st{}) ->
+handle_info({#'basic.deliver'{}, #amqp_msg{
+    props = #'P_basic'{correlation_id = <<CorrID:64>>, content_type = ContentType},
+    payload = Payload}
+}, St = #st{}) ->
     From = dict:fetch(CorrID, St#st.continuations),
-    gen_server:reply(From, {ok, Payload}),
+    gen_server:reply(From, {ok, ContentType, Payload}),
     {noreply, St#st{continuations = dict:erase(CorrID, St#st.continuations)}};
 
 %% reply_text = <<"NO_ROUTE">>
