@@ -38,10 +38,9 @@ Make request:
 %% {error, non_routable} - if rpc client got basic.return
 %% when queue not exist for example
 
-{ok, ResponsePayload} = rmql_rpc_client:call(RPCClient, Payload).
+{ok, ResponsePayload} = rmql_rpc_client:call(RPCClient, ContentType, Payload).
 
-%% Also you can define ContentType or/and QueueName (Routing Key)
-{ok, ResponsePayload} = rmql_rpc_client:call(RPCClient, Payload, ContentType).
+%% Also you can define QueueName (Routing Key)
 {ok, ResponsePayload} = rmql_rpc_client:call(RPCClient, ContentType, Payload, QueueName).
 ```
 
