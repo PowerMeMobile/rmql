@@ -11,7 +11,7 @@
 
 -export([
 	start_link/1, start_link/2,
-	call/2, call/3, call/4
+	call/4, call/5
 ]).
 -export([
 	init/1,
@@ -51,37 +51,23 @@ start_link(Name) ->
 start_link(Name, Queue) when is_atom(Name) ->
     gen_server:start_link({local, Name}, ?MODULE, [Queue], []).
 
--spec call(atom() | pid(), binary()) ->
+-spec call(atom() | pid(), binary(), binary(), pos_integer() | infinity) ->
 	{ok, binary()} |
 	{error, timeout} |
 	{error, disconnected} |
 	{error, non_routable}.
-call(RpcClient, Payload) ->
-    {ok, Timeout} = application:get_env(rmql, rpc_timeout),
-    try	gen_server:call(RpcClient, {call, Payload}, Timeout)
-	catch
-		_:{timeout, _} -> {error, timeout}
-	end.
-
--spec call(atom() | pid(), binary(), binary()) ->
-	{ok, binary()} |
-	{error, timeout} |
-	{error, disconnected} |
-	{error, non_routable}.
-call(RpcClient, Payload, ContentType) ->
-    {ok, Timeout} = application:get_env(rmql, rpc_timeout),
+call(RpcClient, Payload, ContentType, Timeout) ->
     try	gen_server:call(RpcClient, {call, Payload, ContentType}, Timeout)
 	catch
 		_:{timeout, _} -> {error, timeout}
 	end.
 
--spec call(atom() | pid(), binary(), binary(), binary()) ->
+-spec call(atom() | pid(), binary(), binary(), binary(), pos_integer() | infinity) ->
 	{ok, binary()} |
 	{error, timeout} |
 	{error, disconnected} |
 	{error, non_routable}.
-call(RpcClient, ContentType, Payload, Queue) ->
-    {ok, Timeout} = application:get_env(rmql, rpc_timeout),
+call(RpcClient, ContentType, Payload, Queue, Timeout) ->
 	try gen_server:call(RpcClient, {call, ContentType, Payload, Queue}, Timeout)
 	catch
 		_:{timeout, _} -> {error, timeout}
@@ -104,8 +90,6 @@ init([RoutingKey]) ->
 		St2 = #st{} -> {ok, St2}
 	end.
 
-handle_call({call, _}, _From, St = #st{channel = undefined}) ->
-	{reply, {error, disconnected}, St};
 handle_call({call, _, _}, _From, St = #st{channel = undefined}) ->
 	{reply, {error, disconnected}, St};
 handle_call({call, _, _, _}, _From, St = #st{channel = undefined}) ->
@@ -114,10 +98,6 @@ handle_call({call, _, _, _}, _From, St = #st{channel = undefined}) ->
 handle_call({call, ContentType, Payload, Queue}, From, State) ->
 	NewState = publish(ContentType, Payload, Queue, From, State),
 	{noreply, NewState};
-
-handle_call({call, Payload}, From, State) ->
-    NewState = publish(Payload, From, State),
-    {noreply, NewState};
 
 handle_call({call, Payload, ContentType}, From, State) ->
     NewState = publish(ContentType, Payload, From, State),
@@ -200,8 +180,6 @@ setup_channel(St) ->
 		unavailable -> St
 	end.
 
-publish(Payload, From, St = #st{}) ->
-	publish(<<"application/octet-stream">>, Payload, St#st.routing_key, From, St).
 publish(ContentType, Payload, From, St = #st{}) ->
 	publish(ContentType, Payload, St#st.routing_key, From, St).
 publish(ContentType, Payload, RoutingKey, From, St) ->
