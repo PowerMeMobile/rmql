@@ -56,8 +56,8 @@ start_link(Name, Queue) when is_atom(Name) ->
 	{error, timeout} |
 	{error, disconnected} |
 	{error, non_routable}.
-call(RpcClient, Payload, ContentType, Timeout) ->
-    try	gen_server:call(RpcClient, {call, Payload, ContentType}, Timeout)
+call(RpcClient, ContentType, Payload, Timeout) ->
+    try	gen_server:call(RpcClient, {call, ContentType, Payload}, Timeout)
 	catch
 		_:{timeout, _} -> {error, timeout}
 	end.
@@ -95,13 +95,13 @@ handle_call({call, _, _}, _From, St = #st{channel = undefined}) ->
 handle_call({call, _, _, _}, _From, St = #st{channel = undefined}) ->
 	{reply, {error, disconnected}, St};
 
+handle_call({call, ContentType, Payload}, From, State) ->
+    NewState = publish(ContentType, Payload, From, State),
+    {noreply, NewState};
+
 handle_call({call, ContentType, Payload, Queue}, From, State) ->
 	NewState = publish(ContentType, Payload, Queue, From, State),
 	{noreply, NewState};
-
-handle_call({call, Payload, ContentType}, From, State) ->
-    NewState = publish(ContentType, Payload, From, State),
-    {noreply, NewState};
 
 handle_call(Msg, _From, State) ->
 	{stop, {unexpected_call, Msg}, State}.
