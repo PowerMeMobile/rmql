@@ -28,7 +28,7 @@ connection_start() ->
 	receive
 		{amqp_connection, Result} -> Result
 	after
-		2000 -> {error, timeout}
+		10000 -> {error, timeout}
 	end.
 
 
